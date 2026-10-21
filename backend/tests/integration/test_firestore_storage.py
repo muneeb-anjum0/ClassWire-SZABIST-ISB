@@ -83,3 +83,14 @@ def test_stale_source_fallback_reuses_the_first_firestore_read():
     assert store.get_search_source_cache("student", max_age_seconds=1800) is None
     assert store.get_search_source_cache("student", max_age_seconds=None) == source
     document.get.assert_called_once()
+
+
+def test_weekly_snapshot_is_saved_without_a_firestore_expiry():
+    store = FirestoreStore.__new__(FirestoreStore)
+    store.source_cache = Mock()
+    store._source_cache = TTLCache(ttl_seconds=1800, max_entries=4)
+    store._source_hashes = TTLCache(ttl_seconds=1800, max_entries=4)
+
+    assert store.save_search_source_cache("student", {"snapshot_version": 1, "items": []})
+    payload = store.source_cache.document.return_value.set.call_args.args[0]
+    assert "expires_at" not in payload

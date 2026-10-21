@@ -290,7 +290,6 @@ class FirestoreStore:
                 "source_gzip": compressed,
                 "cache_version": 2,
                 "updated_at": now,
-                "expires_at": now + timedelta(days=CACHE_RETENTION_DAYS),
             }
         )
         increment("firestore.write.timetable_source_cache")
@@ -324,10 +323,8 @@ class FirestoreStore:
         if isinstance(source_data, dict):
             self._source_hashes.set(user_id, _cache_content_hash(source_data))
             self._source_cache.set(user_id, (source_data, updated_at))
-        # Cache a valid stale source before applying the freshness boundary.
-        # The search route intentionally asks for a fresh source and then a
-        # stale fallback. Keeping the decoded value avoids a second Firestore
-        # read when the first document is merely older than the refresh TTL.
+        # Other callers can impose an age limit, but normal timetable searches
+        # request this persisted snapshot without one.
         if max_age_seconds is not None and (_utc_now() - updated_at).total_seconds() > max_age_seconds:
             return None
         return source_data if isinstance(source_data, dict) else None

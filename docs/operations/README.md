@@ -21,7 +21,7 @@ ClassWire runs a static React client on Vercel and a Flask API on Render. Firest
 - Threaded handling supports lightweight concurrent requests without multiplying cloud clients unnecessarily.
 - Shared-memory worker temporary files avoid slower disk-backed heartbeat behavior.
 
-The free Render instance can suspend after inactivity. ClassWire deliberately leaves it asleep while local identity and fresh weekday data can answer the user. The first missing/stale weekday, OAuth, or server-only account operation can still incur provider-controlled cold-start delay.
+The free Render instance can suspend after inactivity. ClassWire leaves it asleep while local identity and the saved weekly snapshot answer searches. The first query without a snapshot, a manual Refresh, OAuth, or a server-only account operation can still incur provider-controlled cold-start delay.
 
 ## Background delivery
 
@@ -33,10 +33,10 @@ Workflow concurrency prevents overlapping runs. Temporary network failures recei
 
 | Failure | Behavior |
 | --- | --- |
-| Gmail temporarily unavailable | Use the last persisted normalized source and label the answer stale |
-| Render sleeps after a successful scrape | Reuse the account's normalized Firestore weekdays without Gmail |
-| One Gmail batch component fails | Retry the failed component; reject unresolved partial weeks |
-| Firestore source is stale | Decode once, retain it for fallback, and attempt refresh |
+| Gmail temporarily unavailable during Refresh | Keep the last persisted source and show an error without overwriting it |
+| Render sleeps after a successful scrape | Answer from the browser's saved weekly source without waking Render |
+| One Gmail weekday request fails | Retry temporary errors; reject the incomplete refresh |
+| Older saved source | Keep it until the student explicitly refreshes |
 | Browser request fails | Preserve the last successful visible result |
 | Private browser blocks third-party state | Keep the signed session first-party through the Vercel API proxy |
 | Older request completes late | Ignore it through request sequencing |
@@ -63,7 +63,7 @@ The dependency-free in-process registry tracks:
 - search interpretation and matching duration;
 - matched-row volume;
 - Gmail messages fetched;
-- source tier: memory, Firestore, Gmail, or stale fallback;
+- source tier: memory, Firestore, or Gmail;
 - Firestore reads, writes, and deleted account documents;
 - token, settings, timetable, source, and repeated-query cache hits.
 
@@ -74,13 +74,13 @@ A secret-protected endpoint exposes snapshots. Metrics reset when the Render pro
 ClassWire does not claim access to a provider invoice. It counts the operations controlled by the application:
 
 - normal searches use normalized rows and perform no Gmail read;
-- each requested weekday is refreshed at most once before the next occurrence of that weekday in Karachi unless the user explicitly requests a refresh;
+- interactive search contacts Gmail only when the full-week snapshot is first created or the user explicitly refreshes it; scheduled daily delivery is separate;
 - repeated reads are absorbed by TTL caches;
 - ordinary searches create no Firestore write;
 - unchanged timetable and source writes are suppressed by hashes;
 - only changed weekday messages are downloaded;
 - browser restoration uses IndexedDB;
-- no bootstrap request is made solely for startup; OAuth completion verifies the session and stale-data operations verify it naturally.
+- no bootstrap request is made solely for startup; OAuth completion verifies the session and server-required operations verify it naturally.
 
 These measurements support cost estimation without a paid monitoring platform or fabricated billing figures.
 
@@ -99,6 +99,6 @@ These measurements support cost estimation without a paid monitoring platform or
 - In-process telemetry is not durable across restarts.
 - The Gmail parser is deterministic and versioned, but a future timetable format can still require a parser update.
 - Progressive rendering is appropriate for current timetable sizes; thousands of visible rows could justify viewport virtualization.
-- Firestore TTL deletion is asynchronous after the application-provided expiry timestamp.
+- Firestore TTL deletion of the separate last-presented-timetable document is asynchronous; the weekly source has no expiry timestamp.
 
 [Back to documentation index](../README.md)

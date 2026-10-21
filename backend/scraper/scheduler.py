@@ -25,8 +25,7 @@ from .gmail_client import (
     get_credentials,
     get_message_html,
     get_message_html_from_message,
-    get_messages_batch,
-    list_latest_messages_batch,
+    get_message,
     list_messages,
 )
 from .timetable_parser import (
@@ -168,19 +167,22 @@ def _latest_messages_by_weekday(
     gmail_query_base: str,
     day_names: Iterable[str],
 ) -> Dict[str, Dict]:
-    """Find each weekday's newest available email in one HTTP batch.
+    """Find the newest email for each weekday, independently.
 
-    Gmail returns message searches newest-first. Independent, unbounded
-    weekday queries therefore let today's new Monday schedule coexist with
-    the latest available Tuesday schedule from an older week, without a
-    second round trip or an arbitrary age cut-off.
+    Gmail returns searches newest-first. A newer Monday replaces an older
+    Monday while the latest Tuesday remains available, with no age cut-off.
+    These requests are deliberately independent so one failed weekday search
+    cannot silently disappear inside a batch response.
     """
-    days = list(day_names)
-    queries = {
-        day_name: _build_query(gmail_query_base, day_name)
-        for day_name in days
-    }
-    return list_latest_messages_batch(service, user_email, queries)
+    latest = {}
+    for day_name in day_names:
+        messages = list_messages(
+            service, user_id=user_email,
+            query=_build_query(gmail_query_base, day_name), max_results=1,
+        )
+        if messages:
+            latest[day_name] = messages[0]
+    return latest
 
 
 def _day_from_subject(subject: str) -> Optional[str]:
@@ -312,6 +314,7 @@ def run_once(user_email: str = "me", user_id: Optional[str] = None, user_setting
             previous_items = _items_by_weekday(previous_source)
             can_reuse_previous = (
                 isinstance(previous_source, dict)
+                and previous_source.get("snapshot_version") == 1
                 and previous_source.get("parser_version") == TIMETABLE_PARSER_VERSION
             )
             changed_days = [
@@ -327,17 +330,14 @@ def run_once(user_email: str = "me", user_id: Optional[str] = None, user_setting
                 for day in changed_days
                 if (latest_by_day.get(day) or {}).get("id")
             ]
-            fetched = get_messages_batch(service, user_email, candidate_ids)
+            fetched = {
+                message_id: get_message(service, user_email, message_id)
+                for message_id in candidate_ids
+            }
             increment("gmail.messages_fetched", len(candidate_ids))
-            message_ids_by_day = dict(previous_ids) if can_reuse_previous else {}
-            received_at_by_day = (
-                dict((previous_source or {}).get("source_received_at_by_day") or {})
-                if can_reuse_previous else {}
-            )
-            refreshed_at_by_day = (
-                dict((previous_source or {}).get("refreshed_at_by_day") or {})
-                if can_reuse_previous else {}
-            )
+            message_ids_by_day = dict(previous_ids)
+            received_at_by_day = dict((previous_source or {}).get("source_received_at_by_day") or {})
+            refreshed_at_by_day = dict((previous_source or {}).get("refreshed_at_by_day") or {})
             parser_diagnostics = (
                 dict((previous_source or {}).get("parser_diagnostics") or {})
                 if can_reuse_previous else {}
@@ -346,19 +346,28 @@ def run_once(user_email: str = "me", user_id: Optional[str] = None, user_setting
 
             for day_name in WEEKDAY_NAMES[:6]:
                 if day_name not in refresh_days:
-                    if can_reuse_previous:
-                        items.extend(previous_items.get(day_name, []))
+                    items.extend(previous_items.get(day_name, []))
                     continue
                 selected = latest_by_day.get(day_name) or {}
                 message_id = selected.get("id")
                 if not message_id:
-                    if can_reuse_previous:
-                        items.extend(previous_items.get(day_name, []))
-                    refreshed_at_by_day[day_name] = now_local.astimezone(tz.UTC).isoformat().replace("+00:00", "Z")
+                    items.extend(previous_items.get(day_name, []))
+                    # No new email was found. Keep the previous timetable as a
+                    # fallback, but do not pretend it was updated today.
+                    if received_at_by_day.get(day_name):
+                        refreshed_at_by_day[day_name] = received_at_by_day[day_name]
+                    else:
+                        refreshed_at_by_day.pop(day_name, None)
                     continue
                 message_ids_by_day[day_name] = message_id
                 if can_reuse_previous and previous_ids.get(day_name) == message_id:
                     day_items = previous_items.get(day_name, [])
+                    # Earlier versions stamped the check time even for an old
+                    # message. Recover the actual email date where available.
+                    if received_at_by_day.get(day_name):
+                        refreshed_at_by_day[day_name] = received_at_by_day[day_name]
+                    else:
+                        refreshed_at_by_day.pop(day_name, None)
                     parser_diagnostics[day_name] = {
                         "parser_version": TIMETABLE_PARSER_VERSION,
                         "accepted_rows": len(day_items),
@@ -367,11 +376,23 @@ def run_once(user_email: str = "me", user_id: Optional[str] = None, user_setting
                 else:
                     message = fetched.get(message_id)
                     if not message:
-                        continue
+                        raise RuntimeError(
+                            f"The newest {day_name} timetable email could not be loaded. "
+                            "Your previously saved timetable has not been replaced."
+                        )
                     received_at_by_day[day_name] = _message_received_at(message)
+                    if received_at_by_day[day_name]:
+                        refreshed_at_by_day[day_name] = received_at_by_day[day_name]
+                    else:
+                        refreshed_at_by_day.pop(day_name, None)
                     html = get_message_html_from_message(message) or ""
                     parser_started = time.perf_counter()
                     day_items, diagnostics = parse_html_with_diagnostics(html)
+                    if not day_items:
+                        raise RuntimeError(
+                            f"The newest {day_name} timetable email could not be parsed. "
+                            "Your previously saved timetable has not been replaced."
+                        )
                     observe("parser.timetable", (time.perf_counter() - parser_started) * 1000)
                     increment("parser.rows_accepted", diagnostics.get("accepted_rows", 0))
                     increment(
@@ -385,7 +406,6 @@ def run_once(user_email: str = "me", user_id: Optional[str] = None, user_setting
                 if _day_items_signature(day_items) != _day_items_signature(previous_items.get(day_name, [])):
                     content_changed_days.append(day_name)
                 items.extend(day_items)
-                refreshed_at_by_day[day_name] = now_local.astimezone(tz.UTC).isoformat().replace("+00:00", "Z")
 
             items = _compact_items(items)
             message_ids = [
@@ -395,6 +415,7 @@ def run_once(user_email: str = "me", user_id: Optional[str] = None, user_setting
             ]
             doc = {
                 "for_day": "Entire Week", "for_date": now_local.date().isoformat(),
+                "snapshot_version": 1,
                 "query": query, "message_id": message_ids[0] if message_ids else None,
                 "message_ids": message_ids, "items": items,
                 "message_ids_by_day": message_ids_by_day,

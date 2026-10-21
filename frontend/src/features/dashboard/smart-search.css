@@ -493,6 +493,28 @@
   stroke-width: 2.2;
 }
 
+.smart-search__form button.smart-search__refresh {
+  width: auto;
+  height: 34px;
+  flex: 0 0 auto;
+  padding: 0 9px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+
+.smart-search__form button.smart-search__refresh:hover:not(:disabled) {
+  background: var(--surface-hover);
+  color: var(--text-primary);
+}
+
+.smart-search__form button.smart-search__refresh:disabled {
+  background: transparent;
+  opacity: 0.5;
+}
+
 .smart-search__form button.smart-search__clear {
   width: 34px;
   height: 34px;

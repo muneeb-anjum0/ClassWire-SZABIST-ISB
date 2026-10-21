@@ -13,13 +13,10 @@ from flask import Blueprint, current_app, jsonify, request
 from core.authentication import authenticated_user
 from core.rate_limit import TokenBucketRateLimiter
 from core.resource_limits import positive_int_env
-from core.source_freshness import (
-    SOURCE_FRESHNESS,
+from core.source_snapshot import (
     SUPPORTED_DAYS,
     has_cached_source,
-    next_refresh_by_day,
     normalize_requested_days,
-    stale_source_days,
 )
 from core.ttl_cache import TTLCache
 from core.telemetry import increment, observe
@@ -37,11 +34,10 @@ EMAIL_PATTERN = re.compile(r"[^@\s]+@[^@\s]+\.[^@\s]+")
 
 def create_user_data_blueprint(*, logger, get_run_once, get_store):
     blueprint = Blueprint("user_data", __name__)
-    # Parsed weekday sources remain reusable for one week. Firestore provides
-    # persistence across Render sleeps while this bounded layer removes the
-    # database read for active sessions.
+    # This is only a bounded process cache. The weekly snapshot in Firestore
+    # does not expire; only an explicit user refresh replaces it.
     search_source_cache = TTLCache[str, dict](
-        ttl_seconds=int(SOURCE_FRESHNESS.total_seconds()),
+        ttl_seconds=3600,
         max_entries=positive_int_env("CLASSWIRE_SOURCE_CACHE_ENTRIES", 24, maximum=128),
     )
     # Query interpretation is deterministic for a given in-memory weekly
@@ -77,6 +73,10 @@ def create_user_data_blueprint(*, logger, get_run_once, get_store):
 
     def get_user_from_request():
         return authenticated_user(get_store(), logger)
+
+    def has_weekly_snapshot(source):
+        # Legacy weekday-scoped caches are rebuilt once into a full-week snapshot.
+        return has_cached_source(source) and source.get("snapshot_version") == 1
 
     @blueprint.route("/api/search-history", methods=["GET", "PUT"])
     def search_history():
@@ -202,48 +202,27 @@ def create_user_data_blueprint(*, logger, get_run_once, get_store):
 
             store = get_store()
             from scraper.smart_search import parse_days
-            from scraper.timetable_parser import TIMETABLE_PARSER_VERSION
-
             requested_days = normalize_requested_days(parse_days(query)) or list(SUPPORTED_DAYS)
-
-            def days_requiring_refresh(candidate):
-                if not has_cached_source(candidate):
-                    return list(requested_days)
-                if candidate.get("parser_version") != TIMETABLE_PARSER_VERSION:
-                    return list(requested_days)
-                return stale_source_days(candidate, requested_days)
-
-            force_source_refresh = bool(payload.get("force_refresh")) or bool(
-                re.search(r"\b(?:refresh|latest|update)\b", query, re.IGNORECASE)
-            )
+            force_source_refresh = payload.get("force_refresh") is True
             if force_source_refresh and not current_app.testing and not refresh_limiter.allow(f"search-refresh:{user['id']}"):
                 return jsonify({"success": False, "error": "Please wait before refreshing Gmail again"}), 429
             cached_source = search_source_cache.get(user["id"])
-            source_was_stale = False
             source_tier = "miss"
-            cached_stale_days = days_requiring_refresh(cached_source)
-            if has_cached_source(cached_source) and not force_source_refresh and not cached_stale_days:
+            if has_weekly_snapshot(cached_source) and not force_source_refresh:
                 source = cached_source
                 source_tier = "memory"
             else:
-                # Collapse simultaneous searches for the same user into one
-                # Gmail scrape. Waiters reuse the source produced by the first.
+                # Collapse simultaneous first searches into one full-week scrape.
                 with refresh_lock_for(user["id"]):
                     cached_source = search_source_cache.get(user["id"])
-                    cached_stale_days = days_requiring_refresh(cached_source)
-                    if has_cached_source(cached_source) and not force_source_refresh and not cached_stale_days:
+                    if has_weekly_snapshot(cached_source) and not force_source_refresh:
                         source = cached_source
                         source_tier = "memory_after_wait"
                     else:
                         persisted_source = cached_source if has_cached_source(cached_source) else (
                             store.get_search_source_cache(user["id"], max_age_seconds=None)
                         )
-                        days_to_refresh = (
-                            list(requested_days)
-                            if force_source_refresh
-                            else days_requiring_refresh(persisted_source)
-                        )
-                        if has_cached_source(persisted_source) and not days_to_refresh:
+                        if has_weekly_snapshot(persisted_source) and not force_source_refresh:
                             source = persisted_source
                             source_tier = "firestore"
                             search_source_cache.set(user["id"], source)
@@ -253,30 +232,23 @@ def create_user_data_blueprint(*, logger, get_run_once, get_store):
                                 "timetable_day": "Entire Week",
                                 "_save_cache": False,
                                 "_previous_source": persisted_source,
-                                "_refresh_days": days_to_refresh or requested_days,
+                                "_refresh_days": list(SUPPORTED_DAYS),
                             })
                             scrape_result = get_run_once()(
                                 user_email=user["email"], user_id=user["id"],
                                 user_settings=search_settings,
                             )
                             if not scrape_result or not scrape_result.get("success"):
-                                if has_cached_source(persisted_source):
-                                    source = persisted_source
-                                    source_was_stale = True
-                                    source_tier = "stale"
-                                    search_source_cache.set(user["id"], source)
-                                    logger.warning("Using stale timetable source for user %s after Gmail refresh failed", user["id"])
-                                else:
-                                    detail = (scrape_result or {}).get("error", "Search failed")
-                                    if "credential" in detail.lower() or "oauth" in detail.lower() or "decrypt" in detail.lower():
-                                        detail = "Gmail authorization could not be read. Sign out, reconnect Gmail, and try again."
-                                    return jsonify({"success": False, "error": detail}), 400
+                                detail = (scrape_result or {}).get("error", "Could not refresh the timetable from Gmail")
+                                if "credential" in detail.lower() or "oauth" in detail.lower() or "decrypt" in detail.lower():
+                                    detail = "Gmail authorization could not be read. Sign out, reconnect Gmail, and try again."
+                                return jsonify({"success": False, "error": detail}), 400
                             else:
                                 source = scrape_result.get("data") or {}
                                 source_tier = "gmail"
-                                search_source_cache.set(user["id"], source)
                                 if not store.save_search_source_cache(user["id"], source):
-                                    logger.warning("Could not persist search source for user %s", user["id"])
+                                    return jsonify({"success": False, "error": "Could not save the weekly timetable. Please try again."}), 503
+                                search_source_cache.set(user["id"], source)
 
             if not has_cached_source(source):
                 logger.warning(
@@ -298,8 +270,8 @@ def create_user_data_blueprint(*, logger, get_run_once, get_store):
             from scraper.smart_search import PARSER_VERSION, normalize, search_timetable
             normalized_query = normalize(query)
             message_ids = source.get("message_ids") or [source.get("message_id")]
-            source_revision = "|".join(str(value) for value in message_ids if value)
-            if not source_revision:
+            source_revision = f"{source.get('parser_version')}|" + "|".join(str(value) for value in message_ids if value)
+            if not any(message_ids):
                 source_revision = f"{source.get('for_date', '')}:{len(source_items)}:{id(source)}"
             result_cache_key = (user["id"], source_revision, PARSER_VERSION, normalized_query)
             cached_search_result = search_result_cache.get(result_cache_key)
@@ -319,7 +291,7 @@ def create_user_data_blueprint(*, logger, get_run_once, get_store):
             increment("search.matched_rows", len(search_result.get("items") or []))
             search_result["query"] = query
             search_result["saved_at"] = current_timestamp()
-            search_result["source_stale"] = source_was_stale
+            search_result["source_stale"] = False
             search_result["source_item_count"] = len(source_items)
             matched_items = search_result.pop("items")
             logger.info(
@@ -350,12 +322,11 @@ def create_user_data_blueprint(*, logger, get_run_once, get_store):
                     "tier": source_tier,
                     "requested_days": requested_days,
                     "refreshed_at_by_day": source.get("refreshed_at_by_day") or {},
-                    "next_refresh_at_by_day": next_refresh_by_day(source),
+                    "source_received_at_by_day": source.get("source_received_at_by_day") or {},
                     "parser_version": source.get("parser_version"),
+                    "snapshot_version": source.get("snapshot_version"),
                     # The signed-in browser keeps the normalized source so it
-                    # can answer new questions locally while these weekdays
-                    # remain fresh. Render is then needed only to refresh a
-                    # missing/stale requested day (or for an explicit refresh).
+                    # can answer new questions locally until the user refreshes.
                     "source_items": source_items,
                 },
             }
@@ -365,9 +336,7 @@ def create_user_data_blueprint(*, logger, get_run_once, get_store):
             # database round trip from the response path and avoids turning a
             # read-only interaction into a billed write.
             message = search_result["answer"]
-            if source_was_stale:
-                message += " Using your last saved timetable because Gmail refresh is currently unavailable."
-            return jsonify({"success": True, "data": data, "message": message, "timestamp": current_timestamp(), "cached": source_was_stale})
+            return jsonify({"success": True, "data": data, "message": message, "timestamp": current_timestamp(), "cached": source_tier != "gmail"})
         except Exception as error:
             logger.error("Smart timetable search failed: %s", error, exc_info=True)
             return jsonify({"success": False, "error": str(error), "timestamp": current_timestamp()}), 500

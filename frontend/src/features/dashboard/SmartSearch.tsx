@@ -28,6 +28,7 @@ type Props = {
   query: string;
   setQuery: (value: string) => void;
   onSearch: (query?: string) => void | Promise<unknown>;
+  onRefresh: (query?: string) => void | Promise<unknown>;
   onClear: () => void;
   loading: boolean;
   data: TimetableData | null;
@@ -51,6 +52,7 @@ export default function SmartSearch({
   query,
   setQuery,
   onSearch,
+  onRefresh,
   onClear,
   loading,
   data,
@@ -150,6 +152,15 @@ export default function SmartSearch({
     event.preventDefault();
     const visibleQuery = new FormData(event.currentTarget).get('timetable-query');
     runQuery(typeof visibleQuery === 'string' ? visibleQuery : query);
+  };
+
+  const refresh = () => {
+    const cleaned = query.trim();
+    if (loading || cleaned.length < 2) return;
+    rememberSearch(cleaned);
+    setResultHidden(true);
+    setComposerOpen(false);
+    onRefresh(cleaned);
   };
 
   const clearSearch = () => {
@@ -391,6 +402,14 @@ export default function SmartSearch({
           disabled={loading}
           aria-label="Clear search and start over"
         ><X aria-hidden="true" /></button>}
+        <button
+          type="button"
+          className="smart-search__refresh"
+          onClick={refresh}
+          disabled={loading || query.trim().length < 2}
+          aria-label="Refresh the full weekly timetable from Gmail"
+          title="Refresh the full weekly timetable from Gmail"
+        >Refresh</button>
         <button type="submit" disabled={loading || query.trim().length < 2} aria-label={loading ? 'Searching timetable' : 'Search timetable'}>
           {loading ? <span className="smart-search__loader" /> : <ArrowUp aria-hidden="true" />}
         </button>

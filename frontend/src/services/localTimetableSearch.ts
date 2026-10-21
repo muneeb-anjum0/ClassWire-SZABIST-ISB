@@ -1,5 +1,5 @@
 import { CachedTimetableSource } from './timetableCache';
-import { TimetableData, TimetableItem } from '../types/api';
+import { TimetableConflict, TimetableData, TimetableItem } from '../types/api';
 
 const DAYS = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
 const DAY_ALIASES: Record<string, string[]> = {
@@ -106,6 +106,33 @@ const summaryFor = (items: TimetableItem[]) => {
   };
 };
 
+const conflictsFor = (items: TimetableItem[]): TimetableConflict[] => {
+  const conflicts: TimetableConflict[] = [];
+  DAYS.forEach((day) => {
+    const classes = items.filter((item) => dayOf(item) === day).map((item) => {
+      const [start, end] = String(item.time || item.schedule_time || '')
+        .split(/\s*(?:-|–|to)\s*/i)
+        .map((value) => timeToMinutes(value));
+      return { item, start, end };
+    }).filter((entry) => entry.start !== null && entry.end !== null)
+      .sort((left, right) => (left.start || 0) - (right.start || 0));
+    classes.forEach((left, index) => {
+      classes.slice(index + 1).forEach((right) => {
+        const overlapStart = Math.max(left.start!, right.start!);
+        const overlapEnd = Math.min(left.end!, right.end!);
+        if (overlapStart >= overlapEnd) return;
+        conflicts.push({
+          day,
+          overlap: `${minuteLabel(overlapStart)} – ${minuteLabel(overlapEnd)}`,
+          left: { course: courseOf(left.item), section: sectionOf(left.item), time: left.item.time },
+          right: { course: courseOf(right.item), section: sectionOf(right.item), time: right.item.time },
+        });
+      });
+    });
+  });
+  return conflicts;
+};
+
 export const searchCachedTimetable = (
   query: string,
   source: CachedTimetableSource,
@@ -134,16 +161,25 @@ export const searchCachedTimetable = (
   const baseSection = positionedSections.find(({ index }) => index < firstCourseIndex)?.section
     || (courses.length === 0 ? positionedSections[0]?.section : undefined);
   const pairedSectionByCourse = new Map<string, string>();
+  const classTypeByCourse = new Map<string, 'theory' | 'lab'>();
   positionedCourses.forEach(({ course, index }, courseIndex) => {
     const nextCourseIndex = positionedCourses[courseIndex + 1]?.index ?? Number.POSITIVE_INFINITY;
     const paired = positionedSections.find((section) => section.index > index && section.index < nextCourseIndex);
     if (paired) pairedSectionByCourse.set(course, paired.section);
+    const afterCourse = normalizedQuery.slice(index + compact(course).length, nextCourseIndex);
+    if (/theory/.test(afterCourse)) classTypeByCourse.set(course, 'theory');
+    else if (/lab|laboratory/.test(afterCourse)) classTypeByCourse.set(course, 'lab');
   });
   const exclusionStart = query.search(/\b(?:except|excluding|without|do\s+not\s+take|don't\s+take|dont\s+take)\b/i);
   const exclusionText = exclusionStart >= 0
     ? compact(query.slice(exclusionStart).split(/,|;|\b(?:and\s+(?:i\s+am\s+)?taking|plus|but)\b/i)[0])
     : '';
   const excludedCourses = courses.filter((course) => exclusionText.includes(compact(course)));
+  const isCustomSchedule = !wantsFreeTime && (
+    Boolean(baseSection && [...pairedSectionByCourse.values()].some((section) => section !== baseSection))
+    || pairedSectionByCourse.size > 1
+  );
+  const isSectionWithExclusions = Boolean(baseSection && excludedCourses.length);
   const selected = dayItems.filter((item) => {
     const itemSection = sectionOf(item);
     const itemCourse = courseOf(item);
@@ -158,13 +194,16 @@ export const searchCachedTimetable = (
       || (courseMatch && !excludedCourses.includes(itemCourse) && (!pairedSection || pairedSection === itemSection))
       || codeMatch,
     );
-    if (hasEntity && !(facultyMatch || (sections.length && courses.length
+    if (hasEntity && !(facultyMatch || (isCustomSchedule || isSectionWithExclusions
       ? customScheduleMatch
-      : sectionMatch || courseMatch || codeMatch))) return false;
+      : sections.length && (courses.length || codes.length)
+        ? sectionMatch && (courseMatch || codeMatch)
+        : sectionMatch || courseMatch || codeMatch))) return false;
     const creditText = `${item.course || ''} ${item.course_title || ''} ${item.full_text || ''}`;
-    const classTypeApplies = courses.length === 0 || courseMatch;
-    if (classTypeApplies && wantsTheory && !/\(\s*[23](?:\.0)?\s*,\s*0(?:\.0)?\s*\)/.test(creditText)) return false;
-    if (classTypeApplies && wantsLab && !/\(\s*0(?:\.0)?\s*,\s*1(?:\.0)?\s*\)/.test(creditText)) return false;
+    const requestedType = classTypeByCourse.get(itemCourse)
+      || (courses.length === 0 ? (wantsTheory ? 'theory' : wantsLab ? 'lab' : undefined) : undefined);
+    if (requestedType === 'theory' && !/\(\s*[23](?:\.0)?\s*,\s*0(?:\.0)?\s*\)/.test(creditText)) return false;
+    if (requestedType === 'lab' && !/\(\s*0(?:\.0)?\s*,\s*1(?:\.0)?\s*\)/.test(creditText)) return false;
     return true;
   });
   const availability = wantsFreeTime && faculty.length
@@ -173,6 +212,7 @@ export const searchCachedTimetable = (
       slots: freeSlots(source.items.filter((item) => String(item.faculty || '') === name), days),
     }))
     : undefined;
+  const conflicts = isCustomSchedule ? conflictsFor(selected) : [];
   const answer = availability
     ? `${faculty.join(' and ')} free during university hours.`
     : `Found ${selected.length} ${selected.length === 1 ? 'class' : 'classes'} for your query.`;
@@ -185,9 +225,10 @@ export const searchCachedTimetable = (
     summary: summaryFor(selected),
     source_cache: {
       tier: 'browser',
+      snapshot_version: source.snapshot_version,
       requested_days: days,
       refreshed_at_by_day: source.refreshed_at_by_day,
-      next_refresh_at_by_day: source.next_refresh_at_by_day,
+      source_received_at_by_day: source.source_received_at_by_day,
       parser_version: source.parser_version,
       source_items: source.items,
     },
@@ -198,6 +239,26 @@ export const searchCachedTimetable = (
       recognized: Boolean(selected.length || availability?.length),
       answer,
       intent: availability ? 'free_time' : 'schedule',
+      match_mode: isCustomSchedule ? 'union' : 'intersection',
+      query_plan: {
+        intent: availability ? 'free_time' : 'schedule',
+        day_scope: days,
+        combination: isCustomSchedule ? 'union' : 'intersection',
+        filters: { sections, courses, codes, faculty },
+        exclusions: { courses: excludedCourses, codes: [] },
+        selection_scope: isCustomSchedule ? {
+          base_sections: baseSection ? [baseSection] : [],
+          course_section_pairs: [...pairedSectionByCourse].map(([course, section]) => ({
+            section, kind: 'course' as const, value: course,
+            class_types: classTypeByCourse.has(course) ? [classTypeByCourse.get(course)!] : [],
+          })),
+          unpaired_courses: courses.filter((course) => !pairedSectionByCourse.has(course) && !excludedCourses.includes(course)),
+          unpaired_codes: [],
+          global_class_types: [],
+        } : null,
+      },
+      conflicts,
+      conflict_count: conflicts.length,
       days,
       entities: { sections, courses, codes, faculty },
       free_slots: availability?.[0]?.slots || {},

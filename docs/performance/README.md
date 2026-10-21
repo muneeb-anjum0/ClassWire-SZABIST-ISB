@@ -42,16 +42,16 @@ Render free-tier suspension can still add provider-controlled delay. Application
 ```text
 React state
   -> exact-query IndexedDB cache
-  -> normalized weekday source in IndexedDB + browser-side matching
+  -> normalized full-week source in IndexedDB + browser-side matching
   -> repeated-query process cache
   -> normalized source memory cache
   -> compressed Firestore source
-  -> Gmail refresh only for stale requested weekdays
+  -> Gmail only on first snapshot creation or explicit Refresh
 ```
 
-The first server result stores both the answer and its normalized weekly source in account-scoped IndexedDB. Later wording that targets fresh locally available weekdays is interpreted against that source in the browser, so it does not contact or wake Render. Render is contacted only when a requested weekday is absent, reaches the next occurrence of that weekday at Karachi midnight, the user explicitly asks for a refresh, or an account operation genuinely requires the server. On the server, Gmail is likewise contacted only for missing or stale requested weekdays.
+The first server result stores both the answer and its normalized weekly source in account-scoped IndexedDB. Later wording is interpreted against that source in the browser, so it does not contact or wake Render. The saved source has no automatic age boundary. Render is contacted when the full-week snapshot is absent, the user presses Refresh, or an account operation genuinely requires the server. For interactive search, Gmail is contacted only to create or explicitly refresh the full-week snapshot; scheduled daily delivery is separate.
 
-A new device has no local source yet, so its first timetable question contacts Render once to obtain the account's persisted source. Thereafter it follows the same local freshness boundaries.
+A new device has no local source yet, so its first timetable question contacts Render once to obtain the account's persisted source without scraping Gmail. Thereafter it uses that snapshot until Refresh.
 
 ### Optional semantic inference
 
@@ -83,11 +83,10 @@ are purged on writes and inspection instead of retaining stale object graphs.
 
 ## Gmail efficiency
 
-- Latest message metadata is batched across weekdays.
-- Only requested weekdays that reached their seven-day boundary are queried.
+- Each weekday is queried independently only on initial creation or manual Refresh.
 - Weekday message IDs allow unchanged parsed rows to be reused.
 - Only changed weekday bodies are downloaded.
-- Failed batch parts are retried without repeating successful parts.
+- Temporary Gmail request errors use bounded retry; unresolved errors do not overwrite the prior snapshot.
 - An older latest weekday remains valid when other weekdays have newer messages.
 - Concurrent refresh requests for one user collapse behind one lock.
 
@@ -135,7 +134,7 @@ Large JSON responses are gzip-compressed only when the browser supports compress
 | Every refresh reparsing every day | Per-weekday message IDs and incremental fetch |
 | Gmail throttling and transient failure | Timeouts, bounded backoff, jitter, and partial retry |
 | Search reaching Gmail repeatedly | Durable normalized source separated from displayed result |
-| Same-day searches after Render sleeps | Per-weekday IndexedDB source and browser-side matching |
+| Searches after Render sleeps | Full-week IndexedDB source and browser-side matching |
 | Exact repeated browser search | IndexedDB answer reuse without a backend request |
 | Device-local recent history | Compact account-scoped Firestore search history |
 | Identical search recomputation | Bounded parser-versioned result cache |

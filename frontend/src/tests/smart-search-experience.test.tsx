@@ -8,6 +8,7 @@ const baseProps = {
   query: '',
   setQuery: vi.fn(),
   onSearch: vi.fn(),
+  onRefresh: vi.fn(),
   onClear: vi.fn(),
   loading: false,
   userEmail: 'student@example.com',
@@ -17,6 +18,16 @@ const baseProps = {
   theme: 'light' as const,
   onThemeChange: vi.fn(),
 };
+
+test('the refresh control requests a new full-week Gmail snapshot', async () => {
+  const onRefresh = vi.fn();
+  const user = userEvent.setup();
+  render(<SmartSearch {...baseProps} query="BSSE7A on Monday" onRefresh={onRefresh} data={null} />);
+
+  await user.click(screen.getByRole('button', { name: 'Refresh the full weekly timetable from Gmail' }));
+  expect(onRefresh).toHaveBeenCalledWith('BSSE7A on Monday');
+  expect(baseProps.onSearch).not.toHaveBeenCalled();
+});
 
 test('recent searches can be reopened and removed', async () => {
   localStorage.setItem(

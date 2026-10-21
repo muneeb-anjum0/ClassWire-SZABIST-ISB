@@ -284,6 +284,72 @@ class TestDailyEmailToggle:
 
 class TestSearchEndpoint:
     @patch('app.run_once')
+    def test_first_search_scrapes_full_week_then_next_query_reuses_snapshot(self, mock_run_once, client, mock_store):
+        user = {'id': 'weekly-snapshot-user', 'email': 'weekly@example.com'}
+        source = {
+            'snapshot_version': 1, 'for_day': 'Entire Week', 'items': [
+                {'schedule_day': 'Monday', 'semester_display': 'BS(SE)-7A',
+                 'course_title': 'Software Project Management', 'course_code': 'SEC 3603',
+                 'course': 'SEC 3603 Software Project Management (3,0)', 'time': '02:00 PM - 03:30 PM'},
+                {'schedule_day': 'Tuesday', 'semester_display': 'BS(SE)-7A',
+                 'course_title': 'Digital Image Processing', 'course_code': 'SEC 4515',
+                 'course': 'SEC 4515 Digital Image Processing (3,0)', 'time': '03:30 PM - 05:00 PM'},
+            ],
+        }
+        mock_store.get_or_create_user.return_value = user
+        mock_store.get_user_settings.return_value = {}
+        mock_store.get_search_source_cache.return_value = None
+        mock_store.save_search_source_cache.return_value = True
+        mock_run_once.return_value = {'success': True, 'data': source}
+
+        first = client.post('/api/search', json={'query': 'BSSE7A on Monday'}, headers={'X-User-Email': user['email']})
+        second = client.post('/api/search', json={'query': 'BSSE7A on Tuesday'}, headers={'X-User-Email': user['email']})
+
+        assert first.status_code == second.status_code == 200
+        assert mock_run_once.call_count == 1
+        assert mock_run_once.call_args.kwargs['user_settings']['_refresh_days'] == [
+            'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday',
+        ]
+        assert second.get_json()['data']['items'][0]['course_title'] == 'Digital Image Processing'
+
+    @patch('app.run_once')
+    def test_manual_refresh_replaces_the_whole_week_even_for_a_one_day_query(self, mock_run_once, client, mock_store):
+        user = {'id': 'manual-weekly-refresh-user', 'email': 'manual@example.com'}
+        old_source = {
+            'snapshot_version': 1, 'parser_version': 2,
+            'for_day': 'Entire Week', 'message_ids': ['old-monday'],
+            'items': [{'schedule_day': 'Monday', 'course_title': 'Old Monday Class'}],
+        }
+        new_source = {
+            'snapshot_version': 1, 'parser_version': 2,
+            'for_day': 'Entire Week', 'message_ids': ['new-monday', 'new-tuesday'],
+            'items': [
+                {'schedule_day': 'Monday', 'course_title': 'New Monday Class'},
+                {'schedule_day': 'Tuesday', 'course_title': 'New Tuesday Class'},
+            ],
+        }
+        mock_store.get_or_create_user.return_value = user
+        mock_store.get_search_source_cache.return_value = old_source
+        mock_store.get_user_settings.return_value = {}
+        mock_store.save_search_source_cache.return_value = True
+        mock_run_once.return_value = {'success': True, 'data': new_source}
+        headers = {'X-User-Email': user['email']}
+
+        refreshed = client.post('/api/search', json={
+            'query': 'classes on Monday', 'force_refresh': True,
+        }, headers=headers)
+        following = client.post('/api/search', json={'query': 'classes on Tuesday'}, headers=headers)
+
+        assert refreshed.status_code == following.status_code == 200
+        assert mock_run_once.call_count == 1
+        assert mock_run_once.call_args.kwargs['user_settings']['_previous_source'] == old_source
+        assert mock_run_once.call_args.kwargs['user_settings']['_refresh_days'] == [
+            'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday',
+        ]
+        mock_store.save_search_source_cache.assert_called_once_with(user['id'], new_source)
+        assert following.get_json()['data']['source_cache']['source_items'] == new_source['items']
+
+    @patch('app.run_once')
     def test_search_returns_browser_source_snapshot_without_nesting_items_in_search_metadata(self, mock_run_once, client, mock_store, mock_user):
         item = {
             'schedule_day': 'Monday',
@@ -341,6 +407,7 @@ class TestSearchEndpoint:
                 'time': '02:00 PM - 03:30 PM',
             }],
             'for_day': 'Entire Week',
+            'snapshot_version': 1,
             'parser_version': 2,
             'summary': {},
             'refreshed_at_by_day': {
@@ -418,7 +485,7 @@ class TestSearchEndpoint:
         }
 
     @patch('app.run_once')
-    def test_search_falls_back_to_stale_source_when_gmail_refresh_fails(self, mock_run_once, client, mock_store):
+    def test_saved_source_does_not_refresh_automatically_and_survives_failed_manual_refresh(self, mock_run_once, client, mock_store):
         user = {'id': 'stale-cache-user', 'email': 'stale@example.com'}
         item = {
             'schedule_day': 'Monday',
@@ -429,7 +496,7 @@ class TestSearchEndpoint:
             'faculty': 'Ada Lovelace',
             'time': '02:00 PM - 03:30 PM',
         }
-        source = {'items': [item], 'for_day': 'Entire Week', 'summary': {}}
+        source = {'items': [item], 'for_day': 'Entire Week', 'snapshot_version': 1, 'summary': {}}
         mock_store.get_or_create_user.return_value = user
         mock_store.get_user_settings.return_value = {}
         mock_store.get_search_source_cache.return_value = source
@@ -446,8 +513,16 @@ class TestSearchEndpoint:
         payload = response.get_json()
         assert payload['cached'] is True
         assert payload['data']['items'] == [item]
-        assert payload['data']['search']['source_stale'] is True
-        assert 'last saved timetable' in payload['message']
+        assert payload['data']['search']['source_stale'] is False
+        mock_run_once.assert_not_called()
+
+        refreshed = client.post(
+            '/api/search',
+            json={'query': 'BSSE7A classes on Monday', 'force_refresh': True},
+            headers={'X-User-Email': user['email']},
+        )
+        assert refreshed.status_code == 400
+        assert 'Gmail authorization' in refreshed.get_json()['error']
 
     def test_search_rejects_unbounded_query_input(self, client, mock_store, mock_user):
         mock_store.get_or_create_user.return_value = mock_user

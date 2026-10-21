@@ -8,7 +8,7 @@ ClassWire separates the public interface, authenticated application API, source 
 flowchart LR
   U[Student] --> UI[React interface]
   UI --> IDB[(IndexedDB result cache)]
-  UI -->|stale or missing weekday, OAuth, account actions| API[Flask API]
+  UI -->|first snapshot, manual refresh, OAuth, account actions| API[Flask API]
 
   API --> AUTH[Signed session and Google OAuth]
   API --> CACHE[Bounded TTL caches]
@@ -44,10 +44,10 @@ flowchart LR
 
 1. A durable cached identity opens the dashboard without a background server request; backend sleep or temporary unavailability cannot force the login page.
 2. IndexedDB restores the last successful result and the normalized per-account timetable source.
-3. The browser derives requested weekdays and answers new wording locally while every requested weekday remains fresh.
-4. Missing or stale requested weekdays, as well as explicit refresh requests, call the API; ordinary fresh searches do not wake Render.
-5. API search checks the normalized source in memory, then Firestore, then Gmail only for requested weekdays that reached their next Karachi calendar-week boundary.
-6. Gmail is queried independently for the newest available message for each stale weekday.
+3. The browser answers new wording locally from the saved full-week snapshot, without a time-based refresh boundary.
+4. The first search without a snapshot and an explicit Refresh call the API; ordinary searches with a local snapshot do not wake Render.
+5. API search checks the normalized source in memory, then Firestore, and uses Gmail only when creating or manually refreshing the complete weekly snapshot.
+6. Gmail is queried independently for the newest available message for each weekday.
 7. Message IDs determine which weekday sources can be reused and which must be fetched again.
 8. Changed messages are decoded, parsed, normalized, deduplicated, compared, and persisted.
 9. The query planner records intent, days, sections, courses, codes, faculty, credit values, class types, exclusions, base-section roles, and course-section relationships.
