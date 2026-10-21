@@ -11,6 +11,7 @@ ClassWire presents a conversational timetable search rather than a filter-heavy 
 - Individual recent searches and the complete history can be cleared.
 - The search-bar clear control dismisses the result and returns the composer to its centered state.
 - A hidden result can be restored without rerunning the request.
+- Refresh beside Search explicitly checks all six weekday emails and replaces the saved weekly snapshot.
 - Rapid submissions are guarded so an older result cannot replace the latest question.
 
 ## Authentication experience
@@ -23,7 +24,7 @@ The login page uses a restrained diagonal access band to identify read-only Gmai
 
 ## Feedback model
 
-Search status is rendered in the schedule flow rather than as a detached corner overlay. Success, warning, stale-source, authentication, and error states use distinct colors with diagonal line treatments and restrained entrance and exit motion.
+Search status is rendered in the schedule flow rather than as a detached corner overlay. Success, warning, authentication, and error states use distinct colors with diagonal line treatments and restrained entrance and exit motion.
 
 Persistent account-domain warnings are separate from temporary search feedback. A user signed in outside the expected `@szabist-isb.pk` domain sees a red warning that is not displaced by ordinary search messages.
 

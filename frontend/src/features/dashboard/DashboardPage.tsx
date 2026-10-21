@@ -1,6 +1,7 @@
 import StatusIndicator from '../../components/StatusIndicator/StatusIndicator';
 import TimetableTable from '../../components/TimetableTable/TimetableTable';
 import { useAuth } from '../../context/AuthContext';
+import { verifiedRefreshDates } from '../../services/timetableCache';
 import SmartSearch from './SmartSearch';
 import { useDashboardController } from './useDashboardController';
 
@@ -11,7 +12,6 @@ export default function DashboardPage() {
   const showAccountDomainWarning = Boolean(controller.accountDomainWarning);
   const hasSchedule = Boolean(
     controller.timetableData &&
-    !controller.isScraperRunning &&
     controller.timetableData.items &&
     controller.timetableData.items.length > 0,
   );
@@ -57,6 +57,7 @@ export default function DashboardPage() {
             query={controller.searchQuery}
             setQuery={controller.setSearchQuery}
             onSearch={controller.runSmartSearch}
+            onRefresh={controller.refreshTimetable}
             onClear={controller.clearSmartSearch}
             loading={controller.isScraperRunning}
             data={controller.timetableData}
@@ -101,7 +102,7 @@ export default function DashboardPage() {
                   <TimetableTable
                     items={controller.filteredItems}
                     conflicts={visibleConflicts}
-                    refreshedAtByDay={controller.timetableData.source_cache?.refreshed_at_by_day}
+                    refreshedAtByDay={verifiedRefreshDates(controller.timetableData)}
                   />
                 </div>
               </section>

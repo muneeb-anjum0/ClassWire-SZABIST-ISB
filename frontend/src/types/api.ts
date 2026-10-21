@@ -24,9 +24,10 @@ export interface TimetableData {
   };
   source_cache?: {
     tier: string;
+    snapshot_version?: number;
     requested_days: string[];
     refreshed_at_by_day: Record<string, string>;
-    next_refresh_at_by_day: Record<string, string>;
+    source_received_at_by_day?: Record<string, string>;
     parser_version?: number;
     source_items?: TimetableItem[];
   };

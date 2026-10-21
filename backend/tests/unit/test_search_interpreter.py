@@ -502,6 +502,36 @@ def test_custom_schedule_binds_each_course_to_its_explicit_section():
     )
 
 
+def test_weekly_snapshot_handles_exclusion_and_two_cross_section_courses():
+    items = [
+        *CUSTOM_SCHEDULE_ITEMS,
+        {"schedule_day": "Wednesday", "semester_display": "BS(SE)-7A", "course_code": "SEC 3606",
+         "course_title": "Software Re-engineering", "course": "SEC 3606 Software Re-engineering (3,0)",
+         "time": "08:00 PM - 09:30 PM"},
+        {"schedule_day": "Wednesday", "semester_display": "BS(CS)-3A", "course_code": "CSC 3106",
+         "course_title": "Human Computer Interaction and Computer Graphics",
+         "course": "CSC 3106 Human Computer Interaction and Computer Graphics (2,0)",
+         "time": "02:00 PM - 03:00 PM"},
+    ]
+    result = search_timetable(
+        "im taking classes with BSSE7A except Software Re-engineering and taking "
+        "Software Construction and Development theory with BSSE5B and "
+        "Human Computer Interaction and Computer Graphics with BSCS3A",
+        items,
+    )
+
+    assert {(item["semester_display"], item["course_title"]) for item in result["items"]} == {
+        ("BS(SE)-7A", "Core Seven A"),
+        ("BS(SE)-7A", "Another Core Seven A"),
+        ("BS(SE)-5B", "Software Construction and Development"),
+        ("BS(CS)-3A", "Human Computer Interaction and Computer Graphics"),
+    }
+    assert result["query_plan"]["selection_scope"]["course_section_pairs"] == [
+        {"section": "BS(SE)-5B", "kind": "course", "value": "Software Construction and Development", "class_types": ["theory"]},
+        {"section": "BS(CS)-3A", "kind": "course", "value": "Human Computer Interaction and Computer Graphics", "class_types": []},
+    ]
+
+
 def test_custom_schedule_pairing_does_not_leak_same_course_or_unrelated_section_rows():
     result = search_timetable(
         "I'm in BSSE7A and want to take Software Construction and Development from BSSE5B "

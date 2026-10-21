@@ -40,6 +40,10 @@ const makeSearchData = (query: string, answer: string, items: TimetableData['ite
     recognized: items.length > 0,
     saved_at: new Date().toISOString(),
   },
+  source_cache: {
+    tier: 'firestore', snapshot_version: 1, requested_days: ['Monday'],
+    refreshed_at_by_day: {}, source_items: items,
+  },
 });
 
 beforeEach(() => {
@@ -77,7 +81,7 @@ test('a user search supersedes a slower background result restore', async () => 
     await result.current.runSmartSearch(query);
   });
 
-  expect(apiMocks.searchTimetable).toHaveBeenCalledWith(query);
+  expect(apiMocks.searchTimetable).toHaveBeenCalledWith(query, false);
   expect(result.current.timetableData?.search?.query).toBe(query);
   expect(result.current.timetableData?.items).toHaveLength(1);
 
@@ -180,9 +184,10 @@ test('a differently worded query for a fresh cached weekday never contacts Rende
     ...makeSearchData(firstQuery, 'Found one class.', [item]),
     source_cache: {
       tier: 'firestore',
+      snapshot_version: 1,
       requested_days: ['Monday'],
       refreshed_at_by_day: { Monday: '2099-01-01T00:00:00Z' },
-      next_refresh_at_by_day: { Monday: '2099-01-08T00:00:00Z' },
+      source_received_at_by_day: { Monday: '2099-01-01T00:00:00Z' },
       parser_version: 4,
       source_items: [item],
     },
@@ -207,7 +212,7 @@ test('a differently worded query for a fresh cached weekday never contacts Rende
   expect(result.current.timetableData?.items[0]?.course_title).toBe('Software Project Management');
 });
 
-test('a requested weekday past its refresh boundary contacts Render', async () => {
+test('a saved weekly snapshot remains usable past the old refresh boundary', async () => {
   const firstQuery = 'BSSE7A timetable on Monday';
   const secondQuery = 'Software Project Management on Monday';
   const item = {
@@ -219,9 +224,10 @@ test('a requested weekday past its refresh boundary contacts Render', async () =
     ...makeSearchData(firstQuery, 'Found one class.', [item]),
     source_cache: {
       tier: 'firestore',
+      snapshot_version: 1,
       requested_days: ['Monday'],
       refreshed_at_by_day: { Monday: '2020-01-01T00:00:00Z' },
-      next_refresh_at_by_day: { Monday: '2020-01-08T00:00:00Z' },
+      source_received_at_by_day: { Monday: '2020-01-01T00:00:00Z' },
       parser_version: 4,
       source_items: [item],
     },
@@ -244,5 +250,30 @@ test('a requested weekday past its refresh boundary contacts Render', async () =
   await act(async () => { result.current.clearSmartSearch(); await Promise.resolve(); });
   await act(async () => { await result.current.runSmartSearch(secondQuery); });
 
+  expect(apiMocks.searchTimetable).toHaveBeenCalledTimes(1);
+});
+
+test('manual refresh bypasses saved answers and replaces the cached source', async () => {
+  const query = 'BSSE7A classes on Monday';
+  const oldItem = { semester_display: 'BS(SE)-7A', course_title: 'Old Class', schedule_day: 'Monday' };
+  const newItem = { semester_display: 'BS(SE)-7A', course_title: 'New Class', schedule_day: 'Monday' };
+  const oldResult = makeSearchData(query, 'Found old class.', [oldItem]);
+  const newResult = makeSearchData(query, 'Found new class.', [newItem]);
+  apiMocks.searchTimetable
+    .mockResolvedValueOnce({ success: true, data: oldResult })
+    .mockResolvedValueOnce({ success: true, data: newResult });
+
+  const { result } = renderHook(() => useDashboardController({
+    bootstrap: null, deleteAccount: vi.fn(), isAuthenticated: true,
+    loading: false, logout: vi.fn(), user: { id: 'refresh-user', email: 'refresh-user@example.com' },
+  }));
+  await act(async () => { await result.current.runSmartSearch(query); });
+  await act(async () => { await result.current.refreshTimetable(query); });
+  expect(apiMocks.searchTimetable).toHaveBeenNthCalledWith(2, query, true);
+  expect(result.current.timetableData?.items[0]?.course_title).toBe('New Class');
+
+  await act(async () => { result.current.clearSmartSearch(); await Promise.resolve(); });
+  await act(async () => { await result.current.runSmartSearch(query); });
   expect(apiMocks.searchTimetable).toHaveBeenCalledTimes(2);
+  expect(result.current.timetableData?.items[0]?.course_title).toBe('New Class');
 });

@@ -1,14 +1,15 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { apiService, getApiErrorMessage } from '../../services/api';
 import {
+  clearSearchResultCache,
   deleteTimetableCache,
   readTimetableCache,
   readSearchResultCache,
   readTimetableSourceCache,
-  requestedSourceDaysAreFresh,
+  isUsableWeeklySource,
   writeTimetableCache,
 } from '../../services/timetableCache';
-import { parseLocalQueryDays, searchCachedTimetable } from '../../services/localTimetableSearch';
+import { searchCachedTimetable } from '../../services/localTimetableSearch';
 import { TimetableData } from '../../types/api';
 import { DashboardAuthState } from './dashboardControllerTypes';
 import { useDashboardStatusToast } from './useDashboardStatusToast';
@@ -99,7 +100,7 @@ export const useDashboardController = ({
     if (!silent) showStatus(status, message || 'Data loaded successfully');
   };
 
-  const runSmartSearch = async (query = searchQuery) => {
+  const runSmartSearch = async (query = searchQuery, forceRefresh = false) => {
     const cleaned = query.trim();
     if (cleaned.length < 2 || searchInFlight.current || isScraperRunning) return;
 
@@ -107,7 +108,6 @@ export const useDashboardController = ({
     searchInFlight.current = true;
     try {
       setSearchQuery(cleaned);
-      const forceRefresh = /\b(?:refresh|latest|update)\b/i.test(cleaned);
       if (!forceRefresh) {
         const cachedResult = await readSearchResultCache(user?.email, cleaned);
         if (
@@ -118,8 +118,7 @@ export const useDashboardController = ({
           return;
         }
         const cachedSource = await readTimetableSourceCache(user?.email);
-        const requestedDays = parseLocalQueryDays(cleaned);
-        if (cachedSource && requestedSourceDaysAreFresh(cachedSource, requestedDays)) {
+        if (cachedSource && isUsableWeeklySource(cachedSource)) {
           const localResult = searchCachedTimetable(
             cleaned,
             cachedSource,
@@ -130,26 +129,27 @@ export const useDashboardController = ({
           return;
         }
       }
-      setTimetableData(null);
+      if (!forceRefresh) setTimetableData(null);
       setIsScraperRunning(true);
       setOperationInProgress(true);
-      showStatus('loading', 'Searching your timetable...');
-      const response = await apiService.searchTimetable(cleaned);
+      showStatus('loading', forceRefresh ? 'Refreshing the full week from Gmail...' : 'Searching your timetable...');
+      const response = await apiService.searchTimetable(cleaned, forceRefresh);
       if (requestSequence !== dataRequestSequence.current) return;
       if (!response.success || !response.data) throw new Error(response.error || 'Search failed');
       if (response.data.search?.query?.trim() !== cleaned) {
         throw new Error('The search response did not match your question. Please try again.');
       }
+      if (forceRefresh) await clearSearchResultCache(user?.email);
       applySuccessfulTimetable(
         response.data,
-        response.message,
+        forceRefresh ? 'Checked Gmail and updated your saved weekly timetable.' : response.message,
         false,
         response.data.search?.recognized === false ? 'warning' : 'success',
       );
       void flushSearchHistory();
     } catch (error) {
       if (requestSequence !== dataRequestSequence.current) return;
-      setTimetableData(null);
+      if (!forceRefresh) setTimetableData(null);
       const apiMessage = getApiErrorMessage(error);
       showStatus('error', apiMessage || (error instanceof Error ? error.message : 'Search failed'));
     } finally {
@@ -160,6 +160,8 @@ export const useDashboardController = ({
       }
     }
   };
+
+  const refreshTimetable = (query = searchQuery) => runSmartSearch(query, true);
 
   const clearSmartSearch = () => {
     if (isScraperRunning) return;
@@ -213,8 +215,7 @@ export const useDashboardController = ({
         return;
       }
       // Do not wake Render merely to restore state. A cached browser paints
-      // immediately; a browser without data waits until the user asks for a
-      // weekday whose source is missing or stale.
+      // immediately; a browser without a weekly source waits for a search.
       if (cached) return;
     })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -235,6 +236,7 @@ export const useDashboardController = ({
     logoutConfirmArmed: ui.logoutConfirmArmed,
     message: statusToast.message,
     runSmartSearch,
+    refreshTimetable,
     syncSearchHistory,
     searchQuery,
     setSearchQuery,

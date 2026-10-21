@@ -5,7 +5,6 @@ const STORE_NAME = 'timetables';
 const SEARCH_STORE_NAME = 'search-results';
 const SOURCE_STORE_NAME = 'timetable-sources';
 const DATABASE_VERSION = 3;
-const SEARCH_CACHE_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000;
 const LEGACY_PREFIX = 'classwire:v2:last-timetable:';
 const memoryCache = new Map<string, TimetableData>();
 const searchMemoryCache = new Map<string, TimetableData>();
@@ -14,10 +13,29 @@ let databasePromise: Promise<IDBDatabase | null> | null = null;
 
 export interface CachedTimetableSource {
   items: TimetableItem[];
+  snapshot_version: number;
   parser_version?: number;
   refreshed_at_by_day: Record<string, string>;
-  next_refresh_at_by_day: Record<string, string>;
+  source_received_at_by_day?: Record<string, string>;
 }
+
+const hasVerifiedEmailDate = (
+  refreshed: Record<string, string>,
+  received: Record<string, string> | undefined,
+  day: string,
+) => {
+  const refreshDate = Date.parse(refreshed[day] || '');
+  const emailDate = Date.parse(received?.[day] || '');
+  return Number.isFinite(refreshDate) && Number.isFinite(emailDate)
+    && Math.abs(refreshDate - emailDate) <= 60_000;
+};
+
+export const verifiedRefreshDates = (data: TimetableData | null): Record<string, string> => {
+  const refreshed = data?.source_cache?.refreshed_at_by_day || {};
+  const received = data?.source_cache?.source_received_at_by_day;
+  return Object.fromEntries(Object.entries(refreshed).filter(([day]) =>
+    hasVerifiedEmailDate(refreshed, received, day)));
+};
 
 const normalizeKey = (email?: string) => (email || 'anonymous').trim().toLowerCase();
 
@@ -75,33 +93,17 @@ const validTimetable = (value: unknown): value is TimetableData =>
 const normalizeQuery = (query: string) => query.trim().replace(/\s+/g, ' ').toLocaleLowerCase();
 const searchKey = (email: string | undefined, query: string) => `${normalizeKey(email)}\n${normalizeQuery(query)}`;
 
-export const isSearchCacheFresh = (data: TimetableData, now = Date.now()): boolean => {
-  const requestedDays = data.source_cache?.requested_days || [];
-  const nextRefresh = data.source_cache?.next_refresh_at_by_day || {};
-  if (requestedDays.length > 0 && requestedDays.every((day) => nextRefresh[day])) {
-    return requestedDays.every((day) => {
-      const expires = Date.parse(nextRefresh[day]);
-      return Number.isFinite(expires) && expires > now;
-    });
-  }
-  const savedAt = Date.parse(data.search?.saved_at || '');
-  return Number.isFinite(savedAt) && now - savedAt < SEARCH_CACHE_MAX_AGE_MS;
-};
+export const isSearchCacheFresh = (data: TimetableData): boolean =>
+  data.source_cache?.snapshot_version === 1;
 
 const validSource = (value: unknown): value is CachedTimetableSource => Boolean(
   value && typeof value === 'object'
   && Array.isArray((value as CachedTimetableSource).items)
-  && typeof (value as CachedTimetableSource).next_refresh_at_by_day === 'object',
+  && (value as CachedTimetableSource).snapshot_version === 1,
 );
 
-export const requestedSourceDaysAreFresh = (
-  source: CachedTimetableSource,
-  requestedDays: string[],
-  now = Date.now(),
-): boolean => requestedDays.length > 0 && requestedDays.every((day) => {
-  const expiry = Date.parse(source.next_refresh_at_by_day[day] || '');
-  return Number.isFinite(expiry) && expiry > now;
-});
+export const isUsableWeeklySource = (source: CachedTimetableSource): boolean =>
+  source.snapshot_version === 1;
 
 export const readTimetableSourceCache = async (
   email?: string,
@@ -143,12 +145,13 @@ export const writeTimetableSourceCache = async (
   data: TimetableData,
 ): Promise<void> => {
   const metadata = data.source_cache;
-  if (!metadata?.source_items || !Array.isArray(metadata.source_items)) return;
+  if (metadata?.snapshot_version !== 1 || !Array.isArray(metadata.source_items)) return;
   const source: CachedTimetableSource = {
     items: metadata.source_items,
+    snapshot_version: metadata.snapshot_version,
     parser_version: metadata.parser_version,
     refreshed_at_by_day: metadata.refreshed_at_by_day || {},
-    next_refresh_at_by_day: metadata.next_refresh_at_by_day || {},
+    source_received_at_by_day: metadata.source_received_at_by_day || {},
   };
   const key = normalizeKey(email);
   sourceMemoryCache.set(key, source);
@@ -172,6 +175,28 @@ export const readSearchResultCache = async (
     return result;
   }
   return null;
+};
+
+export const clearSearchResultCache = async (email?: string): Promise<void> => {
+  const key = normalizeKey(email);
+  for (const cachedKey of searchMemoryCache.keys()) {
+    if (cachedKey.startsWith(`${key}\n`)) searchMemoryCache.delete(cachedKey);
+  }
+  const database = await openDatabase();
+  if (!database) return;
+  await new Promise<void>((resolve) => {
+    const transaction = database.transaction(SEARCH_STORE_NAME, 'readwrite');
+    const request = transaction.objectStore(SEARCH_STORE_NAME).openCursor();
+    request.onsuccess = () => {
+      const cursor = request.result;
+      if (!cursor) return;
+      if (String(cursor.key).startsWith(`${key}\n`)) cursor.delete();
+      cursor.continue();
+    };
+    transaction.oncomplete = () => resolve();
+    transaction.onerror = () => resolve();
+    transaction.onabort = () => resolve();
+  });
 };
 
 export const readTimetableCache = async (email?: string): Promise<TimetableData | null> => {
