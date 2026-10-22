@@ -402,17 +402,22 @@ export default function SmartSearch({
           disabled={loading}
           aria-label="Clear search and start over"
         ><X aria-hidden="true" /></button>}
-        <button
-          type="button"
-          className="smart-search__refresh"
-          onClick={refresh}
-          disabled={loading || query.trim().length < 2}
-          aria-label="Refresh the full weekly timetable from Gmail"
-          title="Refresh the full weekly timetable from Gmail"
-        >Refresh</button>
-        <button type="submit" disabled={loading || query.trim().length < 2} aria-label={loading ? 'Searching timetable' : 'Search timetable'}>
-          {loading ? <span className="smart-search__loader" /> : <ArrowUp aria-hidden="true" />}
-        </button>
+        <div className={`smart-search__actions ${loading || query.trim().length < 2 ? 'is-disabled' : ''}`}>
+          <button
+            type="button"
+            className="smart-search__refresh"
+            onClick={refresh}
+            disabled={loading || query.trim().length < 2}
+            aria-label="Refresh the full weekly timetable from Gmail"
+            title="Refresh the full weekly timetable from Gmail"
+          >
+            <RefreshCw aria-hidden="true" />
+            <span>Refresh</span>
+          </button>
+          <button className="smart-search__submit" type="submit" disabled={loading || query.trim().length < 2} aria-label={loading ? 'Searching timetable' : 'Search timetable'}>
+            {loading ? <span className="smart-search__loader" /> : <ArrowUp aria-hidden="true" />}
+          </button>
+        </div>
       </form>
 
       {composerOpen && <div className="smart-search__discovery" id="smart-search-discovery">
