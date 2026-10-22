@@ -493,26 +493,69 @@
   stroke-width: 2.2;
 }
 
+.smart-search__actions {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 3px;
+  border-radius: 999px;
+  background: var(--button-bg);
+  color: var(--button-text);
+  transition: opacity 140ms ease;
+}
+
+.smart-search__actions.is-disabled {
+  opacity: 0.55;
+}
+
+.smart-search__form .smart-search__actions button {
+  background: transparent;
+  color: inherit;
+}
+
+.smart-search__form .smart-search__actions button:disabled {
+  cursor: not-allowed;
+}
+
 .smart-search__form button.smart-search__refresh {
   width: auto;
-  height: 34px;
+  height: 36px;
   flex: 0 0 auto;
-  padding: 0 9px;
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  background: transparent;
-  color: var(--text-secondary);
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 0 11px 0 12px;
+  border-radius: 999px;
   font-size: 12px;
+  font-weight: 500;
+}
+
+.smart-search__form button.smart-search__refresh svg {
+  width: 16px;
+  height: 16px;
+  stroke-width: 2;
 }
 
 .smart-search__form button.smart-search__refresh:hover:not(:disabled) {
-  background: var(--surface-hover);
-  color: var(--text-primary);
+  background: color-mix(in srgb, var(--button-text) 14%, transparent);
 }
 
-.smart-search__form button.smart-search__refresh:disabled {
-  background: transparent;
-  opacity: 0.5;
+.smart-search__form button.smart-search__submit {
+  width: 36px;
+  height: 36px;
+  flex-basis: 36px;
+  background: var(--button-text);
+  color: var(--button-bg);
+}
+
+.smart-search__form button.smart-search__submit:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--button-text) 87%, var(--button-bg));
+}
+
+.smart-search__form .smart-search__actions button:focus-visible {
+  outline: 2px solid var(--button-text);
+  outline-offset: 2px;
 }
 
 .smart-search__form button.smart-search__clear {
@@ -1279,6 +1322,16 @@ html[data-theme='dark'] .smart-search__faculty > header {
 
   .smart-search__form {
     padding-left: 16px;
+  }
+
+  .smart-search__form button.smart-search__refresh {
+    width: 36px;
+    padding: 0;
+    justify-content: center;
+  }
+
+  .smart-search__form button.smart-search__refresh span {
+    display: none;
   }
 
   .smart-search__discovery {
