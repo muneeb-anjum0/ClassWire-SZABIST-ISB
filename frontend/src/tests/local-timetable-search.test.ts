@@ -97,3 +97,35 @@ test('a full-week snapshot answers exclusions and two course-section additions',
     { section: 'BS(CS)-3A', kind: 'course', value: 'Human Computer Interaction and Computer Graphics', class_types: [] },
   ]);
 });
+
+test('a mixed-section query keeps Wednesday base-section classes', () => {
+  const weeklySource = {
+    ...source,
+    items: [
+      ...items,
+      {
+        semester_display: 'BS(SE)-7A', course_title: 'Mobile Application Development',
+        course: 'SEC 3612 · (3,0)', course_code: 'SEC 3612',
+        faculty: 'Muhammad Waseem Malik', schedule_day: 'Wednesday',
+        time: '06:30 PM - 08:00 PM',
+      },
+      {
+        semester_display: 'BS(SE)-7A', course_title: 'Software Re-Engineering',
+        course: 'SEC 3606 · (3,0)', course_code: 'SEC 3606',
+        faculty: 'Awais Mahmood', schedule_day: 'Wednesday',
+        time: '05:00 PM - 06:30 PM',
+      },
+    ],
+  };
+  const result = searchCachedTimetable(
+    'im taking classes with BSSE7A except Software Re-engineering and taking Software Construction and Development theory with BSSE5B and Human Computer Interaction and Computer Graphics with BSCS3A',
+    weeklySource, 17,
+  );
+
+  expect(result.items.filter((item) => item.schedule_day === 'Wednesday')
+    .map((item) => item.course_title)).toEqual([
+    'Human Computer Interaction and Computer Graphics',
+    'Mobile Application Development',
+  ]);
+  expect(result.items.some((item) => item.course_title === 'Software Re-Engineering')).toBe(false);
+});

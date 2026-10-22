@@ -150,15 +150,20 @@ def _target_date(now_local: datetime, next_day_available_hour: int = 17) -> date
 def _build_query(base: str, day_name: str) -> str:
     # Some schedule emails visually contain "for Tuesday", but Gmail's index
     # splits that phrase across HTML nodes. Match the weekday in the subject as
-    # the reliable path and retain the body phrase as a fallback.
-    return f'{base} {{subject:{day_name} "for {day_name}"}} -in:trash'
+    # the reliable path and retain the body phrase as a fallback. Replies and
+    # forwards can retain that subject while containing only a cancellation or
+    # other commentary, so they must not replace the actual schedule email.
+    return (
+        f'{base} {{subject:{day_name} "for {day_name}"}} '
+        '-subject:"Re:" -subject:"Fwd:" -subject:"Fw:" -in:trash'
+    )
 
 
 def _build_week_query(base: str) -> str:
     alternatives = " ".join(
         [*(f"subject:{day}" for day in WEEKDAY_NAMES[:6]), *(f'"for {day}"' for day in WEEKDAY_NAMES[:6])]
     )
-    return f"{base} {{{alternatives}}} -in:trash"
+    return f'{base} {{{alternatives}}} -subject:"Re:" -subject:"Fwd:" -subject:"Fw:" -in:trash'
 
 
 def _latest_messages_by_weekday(
