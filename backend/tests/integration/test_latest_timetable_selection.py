@@ -16,6 +16,8 @@ def test_weekday_query_matches_subject_and_body_variants_without_an_age_limit():
     assert "{subject:Tuesday \"for Tuesday\"}" in query
     assert "newer_than:" not in query
     assert "-in:trash" in query
+    assert '-subject:"Re:"' in query
+    assert '-subject:"Fwd:"' in query
 
 
 def test_latest_weekday_messages_use_independent_unbounded_queries(monkeypatch):
@@ -68,6 +70,31 @@ def test_newer_weekday_emails_replace_only_older_emails_for_that_day(monkeypatch
     assert [latest[day]['id'] for day in ('Monday', 'Tuesday', 'Wednesday', 'Friday', 'Saturday')] == [
         'new-monday', 'new-tuesday', 'wednesday', 'friday', 'saturday',
     ]
+
+
+def test_latest_reply_cannot_displace_the_original_weekday_schedule(monkeypatch):
+    inbox_newest_first = [
+        ('Re: Class Schedule – Wednesday, October 21st', 'cancellation-reply'),
+        ('Class Schedule – Wednesday, October 21st', 'actual-wednesday-schedule'),
+        ('Class Schedule – Wednesday, October 14th', 'older-wednesday-schedule'),
+    ]
+
+    def fake_list(_service, *, user_id, query, max_results):
+        assert user_id == 'me' and max_results == 1
+        assert '-subject:"Re:"' in query
+        return [
+            {'id': message_id}
+            for subject, message_id in inbox_newest_first
+            if subject.startswith('Class Schedule') and 'Wednesday' in subject
+        ][:max_results]
+
+    monkeypatch.setattr('scraper.scheduler.list_messages', fake_list)
+
+    latest = _latest_messages_by_weekday(
+        object(), 'me', 'subject:("Class Schedule" OR schedule) in:inbox', ['Wednesday'],
+    )
+
+    assert latest['Wednesday']['id'] == 'actual-wednesday-schedule'
 
 
 def test_week_query_collects_each_supported_day_in_one_gmail_search():
