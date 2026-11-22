@@ -323,6 +323,7 @@ class TestSearchEndpoint:
         new_source = {
             'snapshot_version': 1, 'parser_version': 2,
             'for_day': 'Entire Week', 'message_ids': ['new-monday', 'new-tuesday'],
+            'last_gmail_checked_at': '2026-10-22T11:15:00+05:00',
             'items': [
                 {'schedule_day': 'Monday', 'course_title': 'New Monday Class'},
                 {'schedule_day': 'Tuesday', 'course_title': 'New Tuesday Class'},
@@ -348,6 +349,8 @@ class TestSearchEndpoint:
         ]
         mock_store.save_search_source_cache.assert_called_once_with(user['id'], new_source)
         assert following.get_json()['data']['source_cache']['source_items'] == new_source['items']
+        assert refreshed.get_json()['data']['source_cache']['last_gmail_checked_at'] == new_source['last_gmail_checked_at']
+        assert following.get_json()['data']['source_cache']['last_gmail_checked_at'] == new_source['last_gmail_checked_at']
 
     @patch('app.run_once')
     def test_search_returns_browser_source_snapshot_without_nesting_items_in_search_metadata(self, mock_run_once, client, mock_store, mock_user):

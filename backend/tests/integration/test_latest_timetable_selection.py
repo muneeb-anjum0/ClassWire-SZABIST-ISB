@@ -1,3 +1,5 @@
+from datetime import datetime
+
 from scraper.scheduler import (
     _build_query,
     _build_week_query,
@@ -11,8 +13,9 @@ from scraper.timetable_parser import TIMETABLE_PARSER_VERSION
 
 
 def test_weekday_query_matches_subject_and_body_variants_without_an_age_limit():
-    query = _build_query('subject:"Class Schedule" in:inbox', "Tuesday")
+    query = _build_query('subject:("Class Schedule" OR schedule) in:inbox', "Tuesday")
 
+    assert 'subject:"Class Schedule"' in query
     assert "{subject:Tuesday \"for Tuesday\"}" in query
     assert "newer_than:" not in query
     assert "-in:trash" in query
@@ -72,8 +75,9 @@ def test_newer_weekday_emails_replace_only_older_emails_for_that_day(monkeypatch
     ]
 
 
-def test_latest_reply_cannot_displace_the_original_weekday_schedule(monkeypatch):
+def test_newer_exam_schedule_and_reply_cannot_displace_the_class_timetable(monkeypatch):
     inbox_newest_first = [
+        ('LAB Midterm Exam Schedule Wednesday 18th November 2026', 'newer-exam-schedule'),
         ('Re: Class Schedule – Wednesday, October 21st', 'cancellation-reply'),
         ('Class Schedule – Wednesday, October 21st', 'actual-wednesday-schedule'),
         ('Class Schedule – Wednesday, October 14th', 'older-wednesday-schedule'),
@@ -82,6 +86,7 @@ def test_latest_reply_cannot_displace_the_original_weekday_schedule(monkeypatch)
     def fake_list(_service, *, user_id, query, max_results):
         assert user_id == 'me' and max_results == 1
         assert '-subject:"Re:"' in query
+        assert 'subject:"Class Schedule"' in query
         return [
             {'id': message_id}
             for subject, message_id in inbox_newest_first
@@ -98,8 +103,9 @@ def test_latest_reply_cannot_displace_the_original_weekday_schedule(monkeypatch)
 
 
 def test_week_query_collects_each_supported_day_in_one_gmail_search():
-    query = _build_week_query('subject:"Class Schedule" in:inbox')
+    query = _build_week_query('subject:("Class Schedule" OR schedule) in:inbox')
 
+    assert 'subject:"Class Schedule"' in query
     assert "subject:Monday" in query
     assert "subject:Saturday" in query
     assert '"for Tuesday"' in query
@@ -200,6 +206,7 @@ def test_week_refresh_fetches_and_parses_only_changed_weekdays(monkeypatch):
 
     assert result["success"] is True
     assert fetched_ids == ["new-mon"]
+    assert datetime.fromisoformat(result["data"]["last_gmail_checked_at"]).tzinfo is not None
     assert result["data"]["refresh"] == {
         "changed_days": ["Monday"],
         "content_changed_days": ["Monday"],

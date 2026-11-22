@@ -29,6 +29,15 @@ test('the refresh control requests a new full-week Gmail snapshot', async () => 
   expect(baseProps.onSearch).not.toHaveBeenCalled();
 });
 
+test('shows the last successful Gmail refresh time beside the search composer', () => {
+  render(<SmartSearch {...baseProps} data={null} lastGmailCheckedAt="2026-10-22T06:15:00Z" />);
+
+  expect(screen.getByText('Last refreshed')).toBeInTheDocument();
+  expect(document.querySelector('.smart-search__last-refresh time')).toHaveAttribute(
+    'dateTime', '2026-10-22T06:15:00Z',
+  );
+});
+
 test('recent searches can be reopened and removed', async () => {
   localStorage.setItem(
     'classwire:v3:recent-searches:student@example.com',

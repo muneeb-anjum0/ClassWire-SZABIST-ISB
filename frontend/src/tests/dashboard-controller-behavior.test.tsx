@@ -259,6 +259,7 @@ test('manual refresh bypasses saved answers and replaces the cached source', asy
   const newItem = { semester_display: 'BS(SE)-7A', course_title: 'New Class', schedule_day: 'Monday' };
   const oldResult = makeSearchData(query, 'Found old class.', [oldItem]);
   const newResult = makeSearchData(query, 'Found new class.', [newItem]);
+  newResult.source_cache!.last_gmail_checked_at = '2026-10-22T06:15:00Z';
   apiMocks.searchTimetable
     .mockResolvedValueOnce({ success: true, data: oldResult })
     .mockResolvedValueOnce({ success: true, data: newResult });
@@ -271,8 +272,10 @@ test('manual refresh bypasses saved answers and replaces the cached source', asy
   await act(async () => { await result.current.refreshTimetable(query); });
   expect(apiMocks.searchTimetable).toHaveBeenNthCalledWith(2, query, true);
   expect(result.current.timetableData?.items[0]?.course_title).toBe('New Class');
+  expect(result.current.lastGmailCheckedAt).toBe('2026-10-22T06:15:00Z');
 
   await act(async () => { result.current.clearSmartSearch(); await Promise.resolve(); });
+  expect(result.current.lastGmailCheckedAt).toBe('2026-10-22T06:15:00Z');
   await act(async () => { await result.current.runSmartSearch(query); });
   expect(apiMocks.searchTimetable).toHaveBeenCalledTimes(2);
   expect(result.current.timetableData?.items[0]?.course_title).toBe('New Class');

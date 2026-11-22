@@ -32,6 +32,7 @@ type Props = {
   onClear: () => void;
   loading: boolean;
   data: TimetableData | null;
+  lastGmailCheckedAt?: string | null;
   userEmail?: string;
   accountRecentSearches?: string[];
   onSearchHistoryChange?: (searches: string[]) => void | Promise<unknown>;
@@ -56,6 +57,7 @@ export default function SmartSearch({
   onClear,
   loading,
   data,
+  lastGmailCheckedAt,
   userEmail,
   accountRecentSearches = EMPTY_SEARCH_HISTORY,
   onSearchHistoryChange,
@@ -80,6 +82,10 @@ export default function SmartSearch({
   const result = data?.search;
   const resultKey = `${result?.query || ''}|${result?.saved_at || ''}|${result?.answer || ''}`;
   const hasContent = Boolean(result || data?.items?.length);
+  const lastRefreshDate = lastGmailCheckedAt ? new Date(lastGmailCheckedAt) : null;
+  const formattedLastRefresh = lastRefreshDate && !Number.isNaN(lastRefreshDate.getTime())
+    ? new Intl.DateTimeFormat(undefined, { dateStyle: 'medium', timeStyle: 'short' }).format(lastRefreshDate)
+    : null;
   const availability = result?.faculty_availability || [];
   const accountConfirmation = logoutConfirmArmed ? 'logout' : deleteArmed ? 'delete' : null;
   const recentStorageKey = useMemo(
@@ -459,6 +465,10 @@ export default function SmartSearch({
         </section>
       </div>}
     </div>
+
+    {formattedLastRefresh && <p className="smart-search__last-refresh" title="Last successful Gmail check. The timetable emails may be older.">
+      Last refreshed <time dateTime={lastGmailCheckedAt || undefined}>{formattedLastRefresh}</time>
+    </p>}
 
     {result && <div
       key={resultKey}

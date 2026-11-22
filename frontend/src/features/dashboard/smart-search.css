@@ -408,6 +408,26 @@
   font-size: 15px;
 }
 
+.smart-search__last-refresh {
+  width: min(100%, 800px);
+  display: flex;
+  justify-content: flex-end;
+  gap: 4px;
+  margin: 8px auto 0;
+  color: var(--text-muted);
+  font-size: 11px;
+  line-height: 1.4;
+}
+
+.smart-search__last-refresh time {
+  color: var(--text-secondary);
+  font-variant-numeric: tabular-nums;
+}
+
+.smart-search__last-refresh + .smart-search__answer {
+  margin-top: 28px;
+}
+
 .smart-search__composer {
   width: min(100%, 800px);
   margin: 0 auto;
@@ -1257,6 +1277,10 @@ html[data-theme='dark'] .smart-search__faculty > header {
   .smart-search__answer {
     margin-top: 28px;
     padding: 0;
+  }
+
+  .smart-search__last-refresh + .smart-search__answer {
+    margin-top: 16px;
   }
 
   .smart-search__answer-header {
