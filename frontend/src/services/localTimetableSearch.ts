@@ -229,6 +229,7 @@ export const searchCachedTimetable = (
       requested_days: days,
       refreshed_at_by_day: source.refreshed_at_by_day,
       source_received_at_by_day: source.source_received_at_by_day,
+      last_gmail_checked_at: source.last_gmail_checked_at,
       parser_version: source.parser_version,
       source_items: source.items,
     },

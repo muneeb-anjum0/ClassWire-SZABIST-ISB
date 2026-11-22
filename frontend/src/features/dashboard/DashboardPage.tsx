@@ -61,6 +61,7 @@ export default function DashboardPage() {
             onClear={controller.clearSmartSearch}
             loading={controller.isScraperRunning}
             data={controller.timetableData}
+            lastGmailCheckedAt={controller.lastGmailCheckedAt}
             userEmail={controller.userEmail}
             accountRecentSearches={controller.accountRecentSearches}
             onSearchHistoryChange={controller.syncSearchHistory}

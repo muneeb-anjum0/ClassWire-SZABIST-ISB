@@ -148,13 +148,12 @@ def _target_date(now_local: datetime, next_day_available_hour: int = 17) -> date
         return now_local
 
 def _build_query(base: str, day_name: str) -> str:
-    # Some schedule emails visually contain "for Tuesday", but Gmail's index
-    # splits that phrase across HTML nodes. Match the weekday in the subject as
-    # the reliable path and retain the body phrase as a fallback. Replies and
-    # forwards can retain that subject while containing only a cancellation or
-    # other commentary, so they must not replace the actual schedule email.
+    # The configurable base can match every kind of "schedule", including a
+    # newer LAB Midterm Exam Schedule for the same weekday. Require the class
+    # bulletin's subject before taking Gmail's newest result. Keep the body
+    # weekday phrase as a fallback when the weekday is absent from the subject.
     return (
-        f'{base} {{subject:{day_name} "for {day_name}"}} '
+        f'{base} subject:"Class Schedule" {{subject:{day_name} "for {day_name}"}} '
         '-subject:"Re:" -subject:"Fwd:" -subject:"Fw:" -in:trash'
     )
 
@@ -163,7 +162,7 @@ def _build_week_query(base: str) -> str:
     alternatives = " ".join(
         [*(f"subject:{day}" for day in WEEKDAY_NAMES[:6]), *(f'"for {day}"' for day in WEEKDAY_NAMES[:6])]
     )
-    return f'{base} {{{alternatives}}} -subject:"Re:" -subject:"Fwd:" -subject:"Fw:" -in:trash'
+    return f'{base} subject:"Class Schedule" {{{alternatives}}} -subject:"Re:" -subject:"Fwd:" -subject:"Fw:" -in:trash'
 
 
 def _latest_messages_by_weekday(
@@ -426,6 +425,7 @@ def run_once(user_email: str = "me", user_id: Optional[str] = None, user_setting
                 "message_ids_by_day": message_ids_by_day,
                 "source_received_at_by_day": received_at_by_day,
                 "refreshed_at_by_day": refreshed_at_by_day,
+                "last_gmail_checked_at": datetime.now(tz=tz.UTC).isoformat(),
                 "parser_version": TIMETABLE_PARSER_VERSION,
                 "parser_diagnostics": parser_diagnostics,
                 "refresh": {

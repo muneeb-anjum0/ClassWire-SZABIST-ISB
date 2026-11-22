@@ -35,6 +35,7 @@ const source = {
   parser_version: 4,
   refreshed_at_by_day: { Monday: '2026-10-12T05:00:00Z' },
   source_received_at_by_day: { Monday: '2026-10-12T05:00:00Z' },
+  last_gmail_checked_at: '2026-10-22T06:15:00Z',
 };
 
 test('relative day parsing uses Karachi time', () => {
@@ -50,6 +51,7 @@ test('fresh browser source builds a cross-section custom timetable locally', () 
   );
 
   expect(result.source_cache?.tier).toBe('browser');
+  expect(result.source_cache?.last_gmail_checked_at).toBe(source.last_gmail_checked_at);
   expect(result.items.map((item) => item.course_title)).toEqual([
     'Software Project Management',
     'Software Construction and Development',

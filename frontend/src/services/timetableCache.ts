@@ -17,6 +17,7 @@ export interface CachedTimetableSource {
   parser_version?: number;
   refreshed_at_by_day: Record<string, string>;
   source_received_at_by_day?: Record<string, string>;
+  last_gmail_checked_at?: string;
 }
 
 const hasVerifiedEmailDate = (
@@ -152,6 +153,7 @@ export const writeTimetableSourceCache = async (
     parser_version: metadata.parser_version,
     refreshed_at_by_day: metadata.refreshed_at_by_day || {},
     source_received_at_by_day: metadata.source_received_at_by_day || {},
+    last_gmail_checked_at: metadata.last_gmail_checked_at,
   };
   const key = normalizeKey(email);
   sourceMemoryCache.set(key, source);

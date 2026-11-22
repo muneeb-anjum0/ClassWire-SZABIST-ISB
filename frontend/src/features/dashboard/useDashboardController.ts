@@ -30,6 +30,7 @@ export const useDashboardController = ({
   const statusToast = useDashboardStatusToast();
   const showStatus = statusToast.showStatus;
   const [timetableData, setTimetableData] = useState<TimetableData | null>(null);
+  const [lastGmailCheckedAt, setLastGmailCheckedAt] = useState<string | null>(null);
   const [isScraperRunning, setIsScraperRunning] = useState(false);
   const [operationInProgress, setOperationInProgress] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
@@ -96,6 +97,9 @@ export const useDashboardController = ({
     status: 'success' | 'warning' = 'success',
   ) => {
     setTimetableData(data);
+    if (data.source_cache?.last_gmail_checked_at) {
+      setLastGmailCheckedAt(data.source_cache.last_gmail_checked_at);
+    }
     void writeTimetableCache(user?.email, data);
     if (!silent) showStatus(status, message || 'Data loaded successfully');
   };
@@ -187,11 +191,17 @@ export const useDashboardController = ({
     const userKey = user?.email?.trim().toLowerCase();
     if (!isAuthenticated || !userKey || hydratedUser.current === userKey) return;
     hydratedUser.current = userKey;
+    setLastGmailCheckedAt(null);
 
     void readCachedTimetable().then((cached) => {
       if (!cached || hydratedUser.current !== userKey) return;
       setTimetableData(cached);
       setSearchQuery(cached.search?.query?.trim() || '');
+    });
+    void readTimetableSourceCache(userKey).then((source) => {
+      if (hydratedUser.current === userKey && source?.last_gmail_checked_at) {
+        setLastGmailCheckedAt(source.last_gmail_checked_at);
+      }
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isAuthenticated, user?.email]);
@@ -232,6 +242,7 @@ export const useDashboardController = ({
     handleLogoutClick: ui.handleLogoutClick,
     isBackendWaking: statusToast.isBackendWaking,
     isScraperRunning,
+    lastGmailCheckedAt,
     isStatusToastClosing: statusToast.isStatusToastClosing,
     logoutConfirmArmed: ui.logoutConfirmArmed,
     message: statusToast.message,

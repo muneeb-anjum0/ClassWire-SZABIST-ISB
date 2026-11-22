@@ -323,6 +323,7 @@ def create_user_data_blueprint(*, logger, get_run_once, get_store):
                     "requested_days": requested_days,
                     "refreshed_at_by_day": source.get("refreshed_at_by_day") or {},
                     "source_received_at_by_day": source.get("source_received_at_by_day") or {},
+                    "last_gmail_checked_at": source.get("last_gmail_checked_at"),
                     "parser_version": source.get("parser_version"),
                     "snapshot_version": source.get("snapshot_version"),
                     # The signed-in browser keeps the normalized source so it

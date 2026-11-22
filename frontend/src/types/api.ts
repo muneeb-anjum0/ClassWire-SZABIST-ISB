@@ -28,6 +28,7 @@ export interface TimetableData {
     requested_days: string[];
     refreshed_at_by_day: Record<string, string>;
     source_received_at_by_day?: Record<string, string>;
+    last_gmail_checked_at?: string;
     parser_version?: number;
     source_items?: TimetableItem[];
   };
